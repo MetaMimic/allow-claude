@@ -19,12 +19,14 @@ global searchVariation := "*100 "
 ; Read last used button from INI file (default to "Light" if not found)
 IniRead(lastButton, iniFile, section, key, "Light")
 
-; Start monitoring
-SetTimer(CheckForButton, 500) ; Check every 500 ms
+; Start monitoring every 500ms
+SetTimer(CheckForButton, 500)
 Return
 
 ; === Function: CheckForButton ===
 CheckForButton() {
+    static lastFound := ""  ; Store last found button in memory (reduces INI reads/writes)
+
     if !WinExist("Claude")  ; Ensure the target window exists.
         return
 
@@ -33,25 +35,33 @@ CheckForButton() {
 
     global buttonVariants, searchVariation, iniFile, section, key, lastButton
 
-    ; Prioritize searching for the last used button first
-    prioritizedVariants := buttonVariants.Clone()  ; Create a copy of the array
-    for index, variant in buttonVariants {
-        if (variant.Name = lastButton) {
-            prioritizedVariants.RemoveAt(index)  ; Remove from its current position
-            prioritizedVariants.InsertAt(1, variant)  ; Move it to the front
-            break
+    ; Swap the last used button to the front of the list (instead of cloning)
+    if (buttonVariants[1].Name != lastButton) {
+        Loop buttonVariants.Length {
+            if (buttonVariants[A_Index].Name = lastButton) {
+                temp := buttonVariants[A_Index]
+                buttonVariants[A_Index] := buttonVariants[1]
+                buttonVariants[1] := temp
+                break
+            }
         }
     }
 
-    foundData := FindButton(prioritizedVariants, searchVariation)
-
-    if (foundData && foundData.Name != lastButton) {  ; Update INI only if it changes
-        lastButton := foundData.Name
-        IniWrite(lastButton, iniFile, section, key)
-    }
+    foundData := FindButton(buttonVariants, searchVariation)
 
     if (foundData) {
+        if (foundData.Name != lastFound) {  ; Update INI only if it changes
+            lastFound := foundData.Name
+            IniWrite(lastFound, iniFile, section, key)
+        }
+
+        ; Temporarily stop the timer to prevent multiple clicks
+        SetTimer(CheckForButton, 0)
+
         ClickButton(foundData.x + foundData.offsetX, foundData.y + foundData.offsetY)
+
+        ; Restart the timer after a short delay
+        SetTimer(CheckForButton, -1000)
     }
 }
 
@@ -62,7 +72,11 @@ FindButton(variants, variation) {
             continue
 
         local foundX, foundY
-        if (ImageSearch(&foundX, &foundY, 0, 0, A_ScreenWidth, A_ScreenHeight, variation . variant.Image) = 0) {
+
+        ; Limit search area if possible (replace values accordingly)
+        x1 := 0, y1 := 0, x2 := A_ScreenWidth, y2 := A_ScreenHeight
+
+        if (ImageSearch(&foundX, &foundY, x1, y1, x2, y2, variation . variant.Image) = 0) {
             return { x: foundX, y: foundY, offsetX: variant.offsetX, offsetY: variant.offsetY, Name: variant.Name }
         }
     }
@@ -72,10 +86,15 @@ FindButton(variants, variation) {
 ; === Function: ClickButton ===
 ClickButton(x, y) {
     orig := MouseGetPos()
-    MouseMove(x + 20, y + 20, 0)
-    Sleep(100)
-    MouseMove(x, y, 0)
-    Sleep(100)
+
+    ; Faster, more human-like movement
+    MouseMove(x + 10, y + 10, 10)
+    Sleep(50)
+    MouseMove(x, y, 10)
+    Sleep(50)
+
     Click(x, y)
-    MouseMove(orig.x, orig.y, 0)
+
+    ; Restore original mouse position
+    MouseMove(orig.x, orig.y, 10)
 }
