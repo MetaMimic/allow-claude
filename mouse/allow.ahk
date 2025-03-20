@@ -1,45 +1,81 @@
-SetTitleMatchMode 2  ; Removed comma
-SetWorkingDir A_ScriptDir  ; Changed syntax, no % needed
+#Persistent
+SetTitleMatchMode(2)  ; Allow partial match of window title.
+SetWorkingDir(A_ScriptDir)  ; Set working directory to the script's folder.
 
-; Path to button image
-ImagePath := "allow_for_this_chat.png"
+; === Persistent Storage ===
+iniFile := "settings.ini"
+section := "Preferences"
+key := "LastButton"
 
-; Check every second
-SetTimer CheckForButton, 1000
-return
+; Define button variants for different themes/sizes.
+global buttonVariants := [
+    { Image: "allow_light.png", Name: "Light", offsetX: 82, offsetY: 18 },
+    { Image: "allow_dark.png",  Name: "Dark",  offsetX: 82, offsetY: 18 }
+]
 
-CheckForButton()
-{
-    if WinExist("Claude")  ; Only run if Claude is open
-    {
-        CoordMode "Pixel", "Screen"  ; Changed syntax
-        CoordMode "Mouse", "Screen"  ; Changed syntax
+; Global image search tolerance (adjust as needed).
+global searchVariation := "*100 "
 
-        ; Search for the button
-        if ImageSearch(&FoundX, &FoundY, 0, 0, A_ScreenWidth, A_ScreenHeight, "*100 " ImagePath)  ; Changed syntax, added &
-        {
-            ; Center offsets (adjust if needed)
-            CenterOffsetX := 82
-            CenterOffsetY := 18
+; Read last used button from INI file (default to "Light" if not found)
+IniRead(lastButton, iniFile, section, key, "Light")
 
-            ; Calculate exact center
-            CenterX := FoundX + CenterOffsetX
-            CenterY := FoundY + CenterOffsetY
+; Start monitoring
+SetTimer(CheckForButton, 500) ; Check every 500 ms
+Return
 
-            ; Store current mouse position
-            MouseGetPos &OriginalX, &OriginalY  ; Changed syntax, added &
+; === Function: CheckForButton ===
+CheckForButton() {
+    if !WinExist("Claude")  ; Ensure the target window exists.
+        return
 
-            ; Move the mouse to prevent bot detection
-            MouseMove CenterX + 20, CenterY + 20, 0  ; 
-            Sleep 100  ; Removed comma
-            MouseMove CenterX, CenterY, 0  ; 
-            Sleep 100  ; Removed comma
+    CoordMode("Pixel", "Screen")
+    CoordMode("Mouse", "Screen")
 
-            ; Click the button
-            Click CenterX, CenterY  ; 
+    global buttonVariants, searchVariation, iniFile, section, key, lastButton
 
-            ; Restore original mouse position
-            MouseMove OriginalX, OriginalY, 0  ; 
+    ; Prioritize searching for the last used button first
+    prioritizedVariants := buttonVariants.Clone()  ; Create a copy of the array
+    for index, variant in buttonVariants {
+        if (variant.Name = lastButton) {
+            prioritizedVariants.RemoveAt(index)  ; Remove from its current position
+            prioritizedVariants.InsertAt(1, variant)  ; Move it to the front
+            break
         }
     }
+
+    foundData := FindButton(prioritizedVariants, searchVariation)
+
+    if (foundData && foundData.Name != lastButton) {  ; Update INI only if it changes
+        lastButton := foundData.Name
+        IniWrite(lastButton, iniFile, section, key)
+    }
+
+    if (foundData) {
+        ClickButton(foundData.x + foundData.offsetX, foundData.y + foundData.offsetY)
+    }
+}
+
+; === Function: FindButton ===
+FindButton(variants, variation) {
+    for variant in variants {
+        if !FileExist(variant.Image)
+            continue
+
+        local foundX, foundY
+        if (ImageSearch(&foundX, &foundY, 0, 0, A_ScreenWidth, A_ScreenHeight, variation . variant.Image) = 0) {
+            return { x: foundX, y: foundY, offsetX: variant.offsetX, offsetY: variant.offsetY, Name: variant.Name }
+        }
+    }
+    return
+}
+
+; === Function: ClickButton ===
+ClickButton(x, y) {
+    orig := MouseGetPos()
+    MouseMove(x + 20, y + 20, 0)
+    Sleep(100)
+    MouseMove(x, y, 0)
+    Sleep(100)
+    Click(x, y)
+    MouseMove(orig.x, orig.y, 0)
 }
