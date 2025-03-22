@@ -1,100 +1,117 @@
-#Persistent
-SetTitleMatchMode(2)  ; Allow partial match of window title.
-SetWorkingDir(A_ScriptDir)  ; Set working directory to the script's folder.
+#Requires AutoHotkey v2
+SetTitleMatchMode(2)
+SetWorkingDir(A_ScriptDir)
 
-; === Persistent Storage ===
-iniFile := "settings.ini"
-section := "Preferences"
-key := "LastButton"
 
-; Define button variants for different themes/sizes.
-global buttonVariants := [
-    { Image: "allow_light.png", Name: "Light", offsetX: 82, offsetY: 18 },
-    { Image: "allow_dark.png",  Name: "Dark",  offsetX: 82, offsetY: 18 }
-]
+; === GLOBALS ===
+global theme := "dark"  ; Change (light/dark)
+global imagePath := "allow_" theme ".png"
+global winTitle := "Claude"  ; Change to your target window title (application, e.g. Claude or Paint 3D for testing)
 
-; Global image search tolerance (adjust as needed).
-global searchVariation := "*100 "
+global offsetX := 82
+global offsetY := 18
 
-; Read last used button from INI file (default to "Light" if not found)
-IniRead(lastButton, iniFile, section, key, "Light")
+; === TRAY SETUP ===
+TraySetIcon("shell32.dll", 44)
 
-; Start monitoring every 500ms
-SetTimer(CheckForButton, 500)
-Return
+CoordMode("Pixel", "Screen")
+CoordMode("Mouse", "Screen")
 
-; === Function: CheckForButton ===
+; === ENTRY POINT ===
+CheckForButton()
+return
+
+; === MAIN FUNCTIONALITY ===
+
 CheckForButton() {
-    static lastFound := ""  ; Store last found button in memory (reduces INI reads/writes)
-
-    if !WinExist("Claude")  ; Ensure the target window exists.
-        return
-
-    CoordMode("Pixel", "Screen")
-    CoordMode("Mouse", "Screen")
-
-    global buttonVariants, searchVariation, iniFile, section, key, lastButton
-
-    ; Swap the last used button to the front of the list (instead of cloning)
-    if (buttonVariants[1].Name != lastButton) {
-        Loop buttonVariants.Length {
-            if (buttonVariants[A_Index].Name = lastButton) {
-                temp := buttonVariants[A_Index]
-                buttonVariants[A_Index] := buttonVariants[1]
-                buttonVariants[1] := temp
-                break
-            }
-        }
-    }
-
-    foundData := FindButton(buttonVariants, searchVariation)
-
-    if (foundData) {
-        if (foundData.Name != lastFound) {  ; Update INI only if it changes
-            lastFound := foundData.Name
-            IniWrite(lastFound, iniFile, section, key)
-        }
-
-        ; Temporarily stop the timer to prevent multiple clicks
-        SetTimer(CheckForButton, 0)
-
-        ClickButton(foundData.x + foundData.offsetX, foundData.y + foundData.offsetY)
-
-        ; Restart the timer after a short delay
+    if !WinExist(winTitle) {
+        ; ToolTip("Window not found: " winTitle)
         SetTimer(CheckForButton, -1000)
+        return
+    }
+
+    area := getClientArea(winTitle)
+    if !area {
+        ; ToolTip("Could not get client area")
+        SetTimer(CheckForButton, -1000)
+        return
+    }
+
+    box := getScanBox(area)
+    coords := searchImage(box)
+    if !coords {
+        SetTimer(CheckForButton, -1000)
+        return
+    }
+
+    clickImage(coords.x, coords.y)
+    ; ToolTip("Waiting 5 seconds before next scan...")
+    SetTimer(CheckForButton, -5000)
+}
+
+getClientArea(winTitle) {
+    hwnd := WinExist(winTitle)
+    rc := Buffer(16, 0)
+
+    if !DllCall("GetClientRect", "ptr", hwnd, "ptr", rc)
+        return false
+    if !DllCall("ClientToScreen", "ptr", hwnd, "ptr", rc)
+        return false
+
+    left   := NumGet(rc, 0, "int")
+    top    := NumGet(rc, 4, "int")
+    right  := left + NumGet(rc, 8, "int")
+    bottom := top + NumGet(rc, 12, "int")
+    width  := right - left
+    height := bottom - top
+
+    return {left: left, top: top, right: right, bottom: bottom, width: width, height: height}
+}
+
+getScanBox(area) {
+    cropTop := area.top + Round(area.height * 0.15)
+    cropBottom := area.bottom - Round(area.height * 0.15)
+    return {left: area.left, top: cropTop, right: area.right, bottom: cropBottom}
+}
+
+searchImage(box) {
+    local foundX := 0, foundY := 0
+
+    try {
+        ImageSearch(&foundX, &foundY, box.left, box.top, box.right, box.bottom, "*100 " . imagePath)
+    } catch {
+        ; ToolTip("ImageSearch error")
+        return false
+    }
+
+    if (foundX == "" || foundY == "") || (foundX == 0 && foundY == 0) {
+        ; ToolTip("ImageSearch returned empty string or 0,0")
+        return false
+    }
+
+    ; ToolTip("Image found at: " foundX ", " foundY)
+    return {x: foundX + offsetX, y: foundY + offsetY}
+}
+
+clickImage(x, y) {
+    try {
+        MouseGetPos(&origX, &origY)
+
+        rX := Random(-16, 16)
+        rY := Random(-6, 6)
+        x += rX
+        y += rY
+
+        MouseMove(x, y, 5)
+        Sleep(50)
+        Click(x, y)
+        Sleep(50)
+
+        ; ToolTip("Image clicked at: " x ", " y " (randomized)")
+        MouseMove(origX, origY, 5)
+    } catch Error as e {
+        try FileAppend("[" A_Now "] Crash: " e.Message "`n", A_ScriptDir "\debug.log", "UTF-8")
     }
 }
 
-; === Function: FindButton ===
-FindButton(variants, variation) {
-    for variant in variants {
-        if !FileExist(variant.Image)
-            continue
 
-        local foundX, foundY
-
-        ; Limit search area if possible (replace values accordingly)
-        x1 := 0, y1 := 0, x2 := A_ScreenWidth, y2 := A_ScreenHeight
-
-        if (ImageSearch(&foundX, &foundY, x1, y1, x2, y2, variation . variant.Image) = 0) {
-            return { x: foundX, y: foundY, offsetX: variant.offsetX, offsetY: variant.offsetY, Name: variant.Name }
-        }
-    }
-    return
-}
-
-; === Function: ClickButton ===
-ClickButton(x, y) {
-    orig := MouseGetPos()
-
-    ; Faster, more human-like movement
-    MouseMove(x + 10, y + 10, 10)
-    Sleep(50)
-    MouseMove(x, y, 10)
-    Sleep(50)
-
-    Click(x, y)
-
-    ; Restore original mouse position
-    MouseMove(orig.x, orig.y, 10)
-}
