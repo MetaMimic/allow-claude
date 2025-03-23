@@ -24,13 +24,19 @@ return
 ; === MAIN FUNCTIONALITY ===
 
 CheckForButton() {
-    if !WinExist(winTitle) {
+    hwnd := WinExist(winTitle)
+    if !hwnd {
         ; ToolTip("Window not found: " winTitle)
-        SetTimer(CheckForButton, -1000)
+        SetTimer(CheckForButton, -3000)
         return
     }
 
-    area := getClientArea(winTitle)
+    if !WinActive(winTitle) {
+        SetTimer(CheckForButton, -3000) ; Wait 5s if not foreground
+        return
+    }
+
+    area := getClientArea(hwnd)
     if !area {
         ; ToolTip("Could not get client area")
         SetTimer(CheckForButton, -1000)
@@ -49,8 +55,7 @@ CheckForButton() {
     SetTimer(CheckForButton, -5000)
 }
 
-getClientArea(winTitle) {
-    hwnd := WinExist(winTitle)
+getClientArea(hwnd) {
     rc := Buffer(16, 0)
 
     if !DllCall("GetClientRect", "ptr", hwnd, "ptr", rc)
@@ -69,9 +74,15 @@ getClientArea(winTitle) {
 }
 
 getScanBox(area) {
-    cropTop := area.top + Round(area.height * 0.15)
+    cropTop    := area.top + Round(area.height * 0.15)
     cropBottom := area.bottom - Round(area.height * 0.15)
-    return {left: area.left, top: cropTop, right: area.right, bottom: cropBottom}
+    cropLeft   := area.left
+    cropRight  := area.left + Round(area.width * 0.50)  ; Left half
+
+    return { left: cropLeft
+           , top: cropTop
+           , right: cropRight
+           , bottom: cropBottom }
 }
 
 searchImage(box) {
